@@ -22,7 +22,13 @@ defmodule SocialScribe.Recall do
   def create_bot(meeting_url, join_at) do
     body = %{
       meeting_url: meeting_url,
-      transcription_options: %{provider: "meeting_captions"},
+      recording_config: %{
+        transcript: %{
+          provider: %{
+            meeting_captions: %{}
+          }
+        }
+      },
       join_at: Timex.format!(join_at, "{ISO:Extended}")
     }
 
