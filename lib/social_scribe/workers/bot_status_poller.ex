@@ -52,33 +52,77 @@ defmodule SocialScribe.Workers.BotStatusPoller do
   end
 
   defp process_completed_bot(bot_record, bot_api_info) do
-    Logger.info("Bot #{bot_record.recall_bot_id} is done. Fetching transcript...")
+    Logger.info("Bot #{bot_record.recall_bot_id} is done. Extracting transcript download URL...")
 
-    case RecallApi.get_bot_transcript(bot_record.recall_bot_id) do
-      {:ok, %Tesla.Env{body: transcript_data}} ->
-        Logger.info("Successfully fetched transcript for bot #{bot_record.recall_bot_id}")
+    transcript_url = extract_transcript_download_url(bot_api_info)
 
-        case Meetings.create_meeting_from_recall_data(bot_record, bot_api_info, transcript_data) do
-          {:ok, meeting} ->
-            Logger.info(
-              "Successfully created meeting record #{meeting.id} from bot #{bot_record.recall_bot_id}"
-            )
+    if transcript_url do
+      Logger.info("Found transcript download URL. Fetching transcript...")
 
-            SocialScribe.Workers.AIContentGenerationWorker.new(%{meeting_id: meeting.id})
-            |> Oban.insert()
+      case fetch_transcript_from_url(transcript_url) do
+        {:ok, transcript_data} ->
+          Logger.info("Successfully fetched transcript for bot #{bot_record.recall_bot_id}")
 
-            Logger.info("Enqueued AI content generation for meeting #{meeting.id}")
+          Logger.debug("Transcript data: #{inspect(transcript_data)}")
 
-          {:error, reason} ->
-            Logger.error(
-              "Failed to create meeting record from bot #{bot_record.recall_bot_id}: #{inspect(reason)}"
-            )
+          case Meetings.create_meeting_from_recall_data(bot_record, bot_api_info, transcript_data) do
+            {:ok, meeting} ->
+              Logger.info(
+                "Successfully created meeting record #{meeting.id} from bot #{bot_record.recall_bot_id}"
+              )
+
+              SocialScribe.Workers.AIContentGenerationWorker.new(%{meeting_id: meeting.id})
+              |> Oban.insert()
+
+              Logger.info("Enqueued AI content generation for meeting #{meeting.id}")
+
+            {:error, reason} ->
+              Logger.error(
+                "Failed to create meeting record from bot #{bot_record.recall_bot_id}: #{inspect(reason)}"
+              )
+          end
+
+        {:error, reason} ->
+          Logger.error(
+            "Failed to fetch transcript for bot #{bot_record.recall_bot_id} after completion: #{inspect(reason)}"
+          )
+      end
+    else
+      Logger.error(
+        "No transcript download URL found in bot info for bot #{bot_record.recall_bot_id}"
+      )
+    end
+  end
+
+  defp extract_transcript_download_url(bot_api_info) do
+    bot_api_info
+    |> Map.get(:recordings, [])
+    |> List.first()
+    |> case do
+      nil ->
+        nil
+
+      recording ->
+        get_in(recording, [:media_shortcuts, :transcript, :data, :download_url])
+    end
+  end
+
+  defp fetch_transcript_from_url(url) do
+    case Tesla.get(url) do
+      {:ok, %Tesla.Env{status: 200, body: body}} when is_binary(body) ->
+        case Jason.decode(body, keys: :atoms) do
+          {:ok, parsed_data} -> {:ok, parsed_data}
+          {:error, reason} -> {:error, {:json_decode_error, reason}}
         end
 
+      {:ok, %Tesla.Env{status: 200, body: body}} ->
+        {:ok, body}
+
+      {:ok, %Tesla.Env{status: status}} ->
+        {:error, "HTTP #{status}"}
+
       {:error, reason} ->
-        Logger.error(
-          "Failed to fetch transcript for bot #{bot_record.recall_bot_id} after completion: #{inspect(reason)}"
-        )
+        {:error, reason}
     end
   end
 end

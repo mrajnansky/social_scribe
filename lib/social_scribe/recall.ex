@@ -52,11 +52,11 @@ defmodule SocialScribe.Recall do
 
   @impl SocialScribe.RecallApi
   def get_bot(recall_bot_id) do
-    Tesla.get(client(), "/bot/#{recall_bot_id}")
+    Tesla.get(client(), "/bot/#{recall_bot_id}/")
   end
 
   @impl SocialScribe.RecallApi
-  def get_bot_transcript(recall_bot_id) do
-    Tesla.get(client(), "/bot/#{recall_bot_id}/transcript")
+  def get_bot_transcript(transcript_id) do
+    Tesla.get(client(), "/transcript/#{transcript_id}/")
   end
 end
