@@ -66,6 +66,11 @@ services:
       # Google Gemini Configuration
       GEMINI_API_KEY: ${GEMINI_API_KEY}
 
+      # Hubspot
+      HUBSPOT_CLIENT_ID: ${HUBSPOT_CLIENT_ID}
+      HUBSPOT_CLIENT_SECRET: ${HUBSPOT_CLIENT_SECRET}
+      HUBSPOT_REDIRECT_URI: ${HUBSPOT_REDIRECT_URI}
+
       # Mix Environment
       MIX_ENV: dev
     volumes:
