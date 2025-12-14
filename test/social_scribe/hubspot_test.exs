@@ -7,13 +7,21 @@ defmodule SocialScribe.HubspotTest do
   describe "contact_suggestions" do
     @valid_attrs %{
       meeting_id: 1,
-      contact_name: "John Doe",
+      contact_name: "All Meeting Changes",
       suggestions: [
         %{
+          "type" => "contact",
           "hubspotField" => "email",
           "value" => "john@example.com",
           "confidence" => "high",
-          "source" => "mentioned in transcript"
+          "source" => "John mentioned his email in transcript"
+        },
+        %{
+          "type" => "account",
+          "hubspotField" => "industry",
+          "value" => "Software",
+          "confidence" => "medium",
+          "source" => "discussed industry"
         }
       ],
       status: "pending"
@@ -25,9 +33,9 @@ defmodule SocialScribe.HubspotTest do
       assert {:ok, %ContactSuggestion{} = contact_suggestion} =
                Hubspot.create_contact_suggestion(@valid_attrs)
 
-      assert contact_suggestion.contact_name == "John Doe"
+      assert contact_suggestion.contact_name == "All Meeting Changes"
       assert contact_suggestion.status == "pending"
-      assert length(contact_suggestion.suggestions) == 1
+      assert length(contact_suggestion.suggestions) == 2
     end
 
     test "create_contact_suggestion/1 with invalid data returns error changeset" do

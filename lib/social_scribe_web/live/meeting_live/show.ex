@@ -4,8 +4,14 @@ defmodule SocialScribeWeb.MeetingLive.Show do
   import SocialScribeWeb.PlatformLogo
   import SocialScribeWeb.ClipboardButton
 
+  require Logger
+
   alias SocialScribe.Meetings
   alias SocialScribe.Automations
+  alias SocialScribe.Accounts
+  alias SocialScribe.HubspotApi
+  alias SocialScribe.Hubspot
+  alias SocialScribe.HubspotTokenRefresher
 
   @impl true
   def mount(%{"id" => meeting_id}, _session, socket) do
@@ -17,6 +23,12 @@ defmodule SocialScribeWeb.MeetingLive.Show do
       |> Kernel.>(0)
 
     automation_results = Automations.list_automation_results_for_meeting(meeting_id)
+
+    contact_suggestions = Hubspot.list_contact_suggestions_by_meeting(meeting_id)
+
+    hubspot_credential =
+      Accounts.list_user_credentials(socket.assigns.current_user, provider: "hubspot")
+      |> List.first()
 
     if meeting.calendar_event.user_id != socket.assigns.current_user.id do
       socket =
@@ -32,6 +44,10 @@ defmodule SocialScribeWeb.MeetingLive.Show do
         |> assign(:meeting, meeting)
         |> assign(:automation_results, automation_results)
         |> assign(:user_has_automations, user_has_automations)
+        |> assign(:contact_suggestions, contact_suggestions)
+        |> assign(:hubspot_credential, hubspot_credential)
+        |> assign(:selected_contact, nil)
+        |> assign(:contact_search_results, [])
         |> assign(
           :follow_up_email_form,
           to_form(%{
@@ -70,6 +86,128 @@ defmodule SocialScribeWeb.MeetingLive.Show do
     {:noreply, socket}
   end
 
+  @impl true
+  def handle_event("search_contacts", params, socket) do
+    query = get_in(params, ["value"]) || ""
+
+    {results, updated_socket} =
+      if socket.assigns.hubspot_credential && String.length(query) >= 2 do
+        case ensure_valid_hubspot_token(socket.assigns.hubspot_credential) do
+          {:ok, access_token, updated_credential} ->
+            # Update socket with new credential if it was refreshed
+            new_socket =
+              if updated_credential do
+                assign(socket, :hubspot_credential, updated_credential)
+              else
+                socket
+              end
+
+            case HubspotApi.search_contacts(access_token, query) do
+              {:ok, contacts} -> {contacts, new_socket}
+              {:error, reason} ->
+                Logger.error("HubSpot search error: #{inspect(reason)}")
+                {[], new_socket}
+            end
+
+          {:error, reason} ->
+            Logger.error("Failed to ensure valid HubSpot token: #{inspect(reason)}")
+            {[], socket}
+        end
+      else
+        {[], socket}
+      end
+
+    Logger.info("Contact search results: #{inspect(results)}")
+
+    updated_socket =
+      updated_socket
+      |> assign(:contact_search_results, results)
+
+    {:noreply, updated_socket}
+  end
+
+  defp ensure_valid_hubspot_token(credential) do
+    # Check if token is expired or about to expire (within 5 minutes)
+    now = DateTime.utc_now()
+    expires_at = credential.expires_at || DateTime.add(now, -1, :second)
+
+    if DateTime.compare(expires_at, DateTime.add(now, 300, :second)) == :lt do
+      Logger.info("HubSpot token expired or expiring soon, refreshing...")
+
+      case HubspotTokenRefresher.refresh_token(credential.refresh_token) do
+        {:ok, new_token_data} ->
+          # Update credential with new tokens
+          {:ok, updated_credential} =
+            Accounts.update_credential_tokens(credential, new_token_data)
+
+          Logger.info("HubSpot token refreshed successfully")
+          {:ok, updated_credential.token, updated_credential}
+
+        {:error, reason} ->
+          Logger.error("Failed to refresh HubSpot token: #{inspect(reason)}")
+          {:error, reason}
+      end
+    else
+      # Token is still valid
+      {:ok, credential.token, nil}
+    end
+  end
+
+  @impl true
+  def handle_event("select_contact", params, socket) do
+    selected_contact = %{
+      id: Map.get(params, "contact_id"),
+      name: Map.get(params, "contact_name", ""),
+      email: Map.get(params, "contact_email")
+    }
+
+    socket =
+      socket
+      |> assign(:selected_contact, selected_contact)
+      |> assign(:contact_search_results, [])
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("clear_contact", _params, socket) do
+    socket =
+      socket
+      |> assign(:selected_contact, nil)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("clear_search_results", _params, socket) do
+    socket =
+      socket
+      |> assign(:contact_search_results, [])
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("generate_suggestions", %{"contact_name" => _contact_name}, socket) do
+    # Enqueue job to generate contact and account changes
+    case Hubspot.enqueue_contact_suggestions(socket.assigns.meeting.id) do
+      {:ok, _job} ->
+        socket =
+          socket
+          |> put_flash(:info, "Generating contact and account changes from meeting...")
+          |> push_navigate(to: ~p"/dashboard/meetings/#{socket.assigns.meeting}")
+
+        {:noreply, socket}
+
+      {:error, _reason} ->
+        socket =
+          socket
+          |> put_flash(:error, "Failed to generate changes. Please try again.")
+
+        {:noreply, socket}
+    end
+  end
+
   defp format_duration(nil), do: "N/A"
 
   defp format_duration(seconds) when is_integer(seconds) do
@@ -83,6 +221,17 @@ defmodule SocialScribeWeb.MeetingLive.Show do
       true -> "Less than a second"
     end
   end
+
+  defp get_initials(name) when is_binary(name) do
+    name
+    |> String.split()
+    |> Enum.take(2)
+    |> Enum.map(&String.first/1)
+    |> Enum.join()
+    |> String.upcase()
+  end
+
+  defp get_initials(_), do: "?"
 
   attr :meeting_transcript, :map, required: true
 

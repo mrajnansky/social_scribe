@@ -90,6 +90,54 @@
     </div>
 
     <.transcript_content meeting_transcript={@meeting.meeting_transcript} />
+
+    <div class="bg-white shadow-xl rounded-lg p-6 md:p-8">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-2xl font-semibold text-slate-700">Contact Update Suggestions</h2>
+        <%= if @hubspot_credential do %>
+          <.link
+            patch={~p"/dashboard/meetings/#{@meeting}/contact_suggestions"}
+            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+          >
+            View Suggestions
+          </.link>
+        <% else %>
+          <p class="text-sm text-slate-500">Connect HubSpot to view suggestions</p>
+        <% end %>
+      </div>
+      <%= if Enum.any?(@contact_suggestions) do %>
+        <div class="space-y-2">
+          <%= for suggestion <- @contact_suggestions do %>
+            <div class="p-3 bg-slate-50 rounded border border-slate-200">
+              <div class="flex justify-between items-start">
+                <div>
+                  <h3 class="font-semibold text-slate-700">Contact & Account Changes</h3>
+                  <p class="text-sm text-slate-500 mt-1">
+                    {length(suggestion.suggestions)} change(s) detected •
+                    <span class="capitalize">{suggestion.status}</span>
+                  </p>
+                  <%= if Enum.any?(suggestion.suggestions) do %>
+                    <div class="mt-2 flex gap-2">
+                      <span class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded bg-blue-50 text-blue-700">
+                        {Enum.count(suggestion.suggestions, &(Map.get(&1, "type") == "contact"))} contact
+                      </span>
+                      <span class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded bg-green-50 text-green-700">
+                        {Enum.count(suggestion.suggestions, &(Map.get(&1, "type") == "account"))} account
+                      </span>
+                    </div>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      <% else %>
+        <p class="text-slate-500">
+          No contact suggestions generated yet. Click "View Suggestions" to generate them.
+        </p>
+      <% end %>
+    </div>
+
     <div class="bg-white shadow-xl rounded-lg p-6 md:p-8">
       <h2 class="text-2xl font-semibold mb-4 text-slate-700">Attendees</h2>
       <%= if Enum.any?(@meeting.meeting_participants) do %>
@@ -133,4 +181,164 @@
     current_user={@current_user}
     patch={~p"/dashboard/meetings/#{@meeting}"}
   />
+</.modal>
+
+<.modal
+  :if={@live_action == :contact_suggestions}
+  id="contact-suggestions-modal"
+  show
+  on_cancel={JS.patch(~p"/dashboard/meetings/#{@meeting}")}
+>
+  <div class="space-y-6">
+    <div>
+      <h2 class="text-2xl font-bold text-slate-800 mb-2">Update in HubSpot</h2>
+      <p class="text-sm text-slate-600">
+        Here are suggested updates to sync with your integrations based on this meeting
+      </p>
+    </div>
+
+    <div class="border-b border-slate-200 pb-4">
+      <label class="block text-sm font-medium text-slate-700 mb-2">
+        Select contact
+      </label>
+      <div class="relative" phx-click-away="clear_search_results">
+        <%= if @selected_contact do %>
+          <div class="w-full flex items-center gap-2 px-3 py-2 border border-slate-300 rounded-md bg-white">
+            <div class="flex items-center gap-2 flex-1">
+              <div class="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-medium">
+                {get_initials(@selected_contact.name)}
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium text-slate-900 truncate">
+                  {@selected_contact.name}
+                </p>
+                <%= if @selected_contact[:email] do %>
+                  <p class="text-xs text-slate-500 truncate">{@selected_contact.email}</p>
+                <% end %>
+              </div>
+            </div>
+            <button
+              type="button"
+              phx-click="clear_contact"
+              class="flex-shrink-0 text-slate-400 hover:text-slate-600"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          </div>
+        <% else %>
+          <input
+            type="text"
+            id="contact-search-input"
+            phx-keyup="search_contacts"
+            phx-debounce="300"
+            placeholder="Type to search contacts..."
+            class="w-full px-4 py-2 border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+            autocomplete="off"
+          />
+        <% end %>
+        <%= if Enum.any?(@contact_search_results) do %>
+          <div class="absolute z-10 w-full mt-1 bg-white border border-slate-300 rounded-md shadow-lg max-h-60 overflow-auto">
+            <div
+              :for={contact <- @contact_search_results}
+              phx-click="select_contact"
+              phx-value-contact_id={contact.id}
+              phx-value-contact_name={contact.name}
+              phx-value-contact_email={contact.email}
+              class="px-4 py-2 hover:bg-slate-50 cursor-pointer border-b border-slate-100 last:border-b-0"
+            >
+              <div class="flex items-center gap-3">
+                <div class="flex-shrink-0 w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-700 text-sm font-medium">
+                  {get_initials(contact.name)}
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="font-medium text-slate-900">{contact.name}</div>
+                  <div class="text-sm text-slate-500">
+                    <%= if contact.email do %>
+                      {contact.email}
+                      <%= if contact.company do %>
+                        • {contact.company}
+                      <% end %>
+                    <% else %>
+                      <%= if contact.company do %>
+                        {contact.company}
+                      <% end %>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+
+    <%= if Enum.any?(@contact_suggestions) do %>
+      <%= for suggestion_record <- @contact_suggestions do %>
+        <%= if Enum.any?(suggestion_record.suggestions) do %>
+          <div class="space-y-4 max-h-96 overflow-y-auto">
+            <div class="space-y-2">
+              <div
+                :for={change <- suggestion_record.suggestions}
+                class="bg-white rounded p-3 border border-slate-200"
+              >
+                <div class="flex items-start gap-2">
+                  <span class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-slate-100 text-slate-700">
+                    {Map.get(change, "type", "contact")}
+                  </span>
+                  <div class="flex-1">
+                    <p class="text-sm font-medium text-slate-700">
+                      {Map.get(change, "hubspotField", "field")}:
+                    </p>
+                    <p class="text-sm text-slate-900 mt-1">
+                      {Map.get(change, "value", "")}
+                    </p>
+                    <p class="text-xs text-slate-500 mt-1">
+                      Confidence: {Map.get(change, "confidence", "unknown")} •
+                      {Map.get(change, "source", "")}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+
+      <div class="flex justify-end gap-2 pt-4 border-t">
+        <.link
+          patch={~p"/dashboard/meetings/#{@meeting}"}
+          class="inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50"
+        >
+          Close
+        </.link>
+        <button
+          type="button"
+          class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+          disabled
+        >
+          Sync to HubSpot (Coming Soon)
+        </button>
+      </div>
+    <% else %>
+      <div class="text-center py-8">
+        <p class="text-slate-600 mb-4">
+          No contact or account changes have been extracted from this meeting yet.
+        </p>
+        <button
+          phx-click="generate_suggestions"
+          phx-value-contact_name="all"
+          class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+        >
+          Extract Changes Now
+        </button>
+      </div>
+    <% end %>
+  </div>
 </.modal>

@@ -43,24 +43,24 @@ defmodule SocialScribe.Workers.ContactSuggestionsWorker do
       case AIContentGeneratorApi.generate_contact_suggestions_batch(meeting, participant_names) do
         {:ok, suggestions_json} ->
           Logger.info(
-            "Generated contact suggestions for #{length(participant_names)} participants in meeting #{meeting.id}"
+            "Generated #{length(suggestions_json)} contact and account changes for meeting #{meeting.id}"
           )
 
           # Log the structured JSON response
-          Logger.info("Contact suggestions JSON: #{inspect(suggestions_json)}")
+          Logger.info("Contact/Account changes JSON: #{inspect(suggestions_json)}")
 
           # Save suggestions to database
           case Hubspot.create_contact_suggestions_batch(meeting.id, suggestions_json) do
-            {:ok, saved_suggestions} ->
+            {:ok, _saved_suggestion} ->
               Logger.info(
-                "Successfully saved #{length(saved_suggestions)} contact suggestions to database for meeting #{meeting.id}"
+                "Successfully saved #{length(suggestions_json)} contact/account changes to database for meeting #{meeting.id}"
               )
 
               :ok
 
             {:error, reason} ->
               Logger.error(
-                "Failed to save contact suggestions to database for meeting #{meeting.id}: #{inspect(reason)}"
+                "Failed to save contact/account changes to database for meeting #{meeting.id}: #{inspect(reason)}"
               )
 
               {:error, :db_save_failed}
@@ -68,7 +68,7 @@ defmodule SocialScribe.Workers.ContactSuggestionsWorker do
 
         {:error, reason} ->
           Logger.error(
-            "Failed to generate contact suggestions for meeting #{meeting.id}: #{inspect(reason)}"
+            "Failed to generate contact/account changes for meeting #{meeting.id}: #{inspect(reason)}"
           )
 
           {:error, reason}

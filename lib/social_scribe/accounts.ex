@@ -379,6 +379,20 @@ defmodule SocialScribe.Accounts do
     |> Repo.update()
   end
 
+  def update_credential_tokens(%UserCredential{} = credential, %{
+        "access_token" => token,
+        "refresh_token" => refresh_token,
+        "expires_in" => expires_in
+      }) do
+    credential
+    |> UserCredential.changeset(%{
+      token: token,
+      refresh_token: refresh_token,
+      expires_at: DateTime.add(DateTime.utc_now(), expires_in, :second)
+    })
+    |> Repo.update()
+  end
+
   alias SocialScribe.Accounts.FacebookPageCredential
 
   @doc """

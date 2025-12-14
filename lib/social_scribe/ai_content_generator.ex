@@ -46,22 +46,18 @@ defmodule SocialScribe.AIContentGenerator do
   end
 
   @impl SocialScribe.AIContentGeneratorApi
-  def generate_contact_suggestions_batch(meeting, participant_names) do
+  def generate_contact_suggestions_batch(meeting, _participant_names) do
     case Meetings.generate_prompt_for_meeting(meeting) do
       {:error, reason} ->
         {:error, reason}
 
       {:ok, meeting_prompt} ->
-        participants_list = Enum.join(participant_names, ", ")
-
         prompt = """
-        You are an expert CRM analyst helping to enrich contact records in HubSpot based on meeting interactions.
+        You are an expert CRM analyst helping to identify contact and account information changes from meeting transcripts for HubSpot.
 
-        Your task is to analyze the meeting transcript and generate structured, actionable suggestions for updating HubSpot contact records for ALL meeting participants.
+        Your task is to analyze the meeting transcript and extract ALL contact information updates, changes, or new data points mentioned during the meeting, as well as company/account information.
 
-        Participants to analyze: #{participants_list}
-
-        For each participant, extract information that could be used to update their HubSpot contact record. Return ONLY a valid JSON array with NO markdown formatting, NO code blocks, NO backticks.
+        Return a flat array of changes - it doesn't matter which contact or company they belong to. Any information mentioned should be included as a separate change item.
 
         CRITICAL FORMATTING REQUIREMENTS:
         - Return ONLY the JSON array, nothing else
@@ -72,58 +68,92 @@ defmodule SocialScribe.AIContentGenerator do
         JSON Structure (return exactly this format):
         [
           {
-            "name": "Full Name",
-            "suggestions": [
-              {
-                "hubspotField": "email",
-                "value": "email@example.com",
-                "confidence": "high",
-                "source": "mentioned in transcript at 00:05:23"
-              },
-              {
-                "hubspotField": "jobtitle",
-                "value": "Senior Product Manager",
-                "confidence": "high",
-                "source": "stated role during introduction"
-              },
-              {
-                "hubspotField": "company",
-                "value": "Acme Corp",
-                "confidence": "medium",
-                "source": "discussed working at Acme"
-              },
-              {
-                "hubspotField": "phone",
-                "value": "+1-555-0123",
-                "confidence": "high",
-                "source": "shared contact number"
-              },
-              {
-                "hubspotField": "notes",
-                "value": "Key decision maker for Q1 budget allocation. Interested in enterprise tier. Mentioned competitor evaluation ending March 15.",
-                "confidence": "high",
-                "source": "discussed throughout meeting"
-              }
-            ]
+            "type": "contact",
+            "hubspotField": "email",
+            "value": "email@example.com",
+            "confidence": "high",
+            "source": "John mentioned his email at 00:05:23"
+            "transcriptTimestamp": "00:05:23"  // Optional: include if available
+          },
+          {
+            "type": "contact",
+            "hubspotField": "jobtitle",
+            "value": "Senior Product Manager",
+            "confidence": "high",
+            "source": "John stated role during introduction"
+            "transcriptTimestamp": "00:05:23"
+          },
+          {
+            "type": "account",
+            "hubspotField": "name",
+            "value": "Acme Corporation",
+            "confidence": "high",
+            "source": "Jane mentioned company name"
+            "transcriptTimestamp": "00:10:45"
+          },
+          {
+            "type": "account",
+            "hubspotField": "industry",
+            "value": "Software",
+            "confidence": "medium",
+            "source": "discussed being in software industry"
+            "transcriptTimestamp": "00:15:30"
+          },
+          {
+            "type": "contact",
+            "hubspotField": "phone",
+            "value": "+1-555-0123",
+            "confidence": "high",
+            "source": "Bob shared contact number"
+            "transcriptTimestamp": "00:20:10"
+          },
+          {
+            "type": "contact",
+            "hubspotField": "notes",
+            "value": "Key decision maker for Q1 budget allocation. Interested in enterprise tier.",
+            "confidence": "high",
+            "source": "discussed throughout meeting"
+            "transcriptTimestamp": "00:25:00"
+          },
+          {
+            "type": "account",
+            "hubspotField": "notes",
+            "value": "Evaluating competitors until March 15. Budget approved for Q1.",
+            "confidence": "high",
+            "source": "discussed deal timeline and budget"
+            "transcriptTimestamp": "00:30:00"
           }
         ]
 
-        Common HubSpot fields to populate (use these exact field names):
+        Common HubSpot CONTACT fields to extract (use these exact field names):
         - email, phone, mobilephone
         - jobtitle, company, industry
         - city, state, country
         - website, linkedin_url, twitter_handle
-        - notes (for general insights, next steps, interests)
+        - notes (for general insights, next steps, interests, business context)
         - hs_lead_status (e.g., "NEW", "OPEN", "IN_PROGRESS", "QUALIFIED")
+
+        Common HubSpot ACCOUNT/COMPANY fields to extract (use these exact field names):
+        - name (company name)
+        - domain (company website domain)
+        - industry, type (e.g., "PROSPECT", "PARTNER", "RESELLER")
+        - city, state, country, zip
+        - phone, website
+        - numberofemployees, annualrevenue
+        - notes (deal context, business challenges, opportunities, timeline)
+        - description (company description)
 
         CRITICAL GUIDELINES:
         - Only include factual information directly from the transcript
         - Do NOT make assumptions or inferences beyond what was explicitly stated
         - Set confidence to "high" only for explicitly stated facts, "medium" for reasonable inferences, "low" for uncertain information
-        - Always include a "source" field explaining where in the transcript this information came from
-        - If a participant appears with name variations (e.g., "John" vs "John Smith"), use the most complete name
-        - If a participant was not present or barely mentioned, include them with an empty suggestions array
-        - Use the "notes" field for insights that don't fit standard fields (business context, interests, next steps, deal insights)
+        - Always include a "source" field explaining where/who this information came from in the transcript
+        - Include the person's name in the source field when possible (e.g., "John mentioned his email", "Sarah stated her role")
+        - Set "type" to "contact" for person-specific information (email, phone, job title, etc.)
+        - Set "type" to "account" for company/organization information (company name, industry, revenue, etc.)
+        - Extract ALL contact and account information mentioned, regardless of who it belongs to
+        - Each piece of information should be a separate item in the array
+        - Use "notes" fields for contextual information like deal status, challenges, opportunities, timelines
         - Return ONLY the JSON array, no other text
 
         #{meeting_prompt}

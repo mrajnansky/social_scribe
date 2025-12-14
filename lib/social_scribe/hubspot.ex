@@ -35,29 +35,27 @@ defmodule SocialScribe.Hubspot do
   ## Parameters
     - meeting_id: The ID of the meeting
     - suggestions_json: Array of maps with format:
-      [%{"name" => "John Doe", "suggestions" => [%{"hubspotField" => "email", ...}]}]
+      [%{"type" => "contact", "hubspotField" => "email", "value" => "...", "confidence" => "high", "source" => "..."}]
 
   ## Examples
 
       iex> create_contact_suggestions_batch(123, suggestions_json)
-      {:ok, [%ContactSuggestion{}, ...]}
+      {:ok, %ContactSuggestion{}}
   """
   def create_contact_suggestions_batch(meeting_id, suggestions_json) when is_list(suggestions_json) do
-    Repo.transaction(fn ->
-      Enum.map(suggestions_json, fn %{"name" => name, "suggestions" => suggestions} ->
-        attrs = %{
-          meeting_id: meeting_id,
-          contact_name: name,
-          suggestions: suggestions,
-          status: "pending"
-        }
+    # Store all suggestions as a single record per meeting
+    attrs = %{
+      meeting_id: meeting_id,
+      contact_name: "All Meeting Changes",
+      suggestions: suggestions_json,
+      status: "pending"
+    }
 
-        case create_contact_suggestion(attrs) do
-          {:ok, contact_suggestion} -> contact_suggestion
-          {:error, changeset} -> Repo.rollback(changeset)
-        end
-      end)
-    end)
+    # Delete any existing suggestions for this meeting before creating new ones
+    from(cs in ContactSuggestion, where: cs.meeting_id == ^meeting_id)
+    |> Repo.delete_all()
+
+    create_contact_suggestion(attrs)
   end
 
   @doc """
