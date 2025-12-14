@@ -132,12 +132,18 @@ defmodule SocialScribe.Bots do
                :minute
              )
            ) do
+      status_code =
+        case api_response.status_changes do
+          [first_status | _] -> first_status.code
+          [] -> "ready"
+        end
+
       create_recall_bot(%{
         user_id: user.id,
         calendar_event_id: calendar_event.id,
         recall_bot_id: api_response.id,
         meeting_url: calendar_event.hangout_link,
-        status: api_response.status_changes |> List.first() |> Map.get(:code)
+        status: status_code
       })
     else
       {:error, reason} -> {:error, {:api_error, reason}}
@@ -176,8 +182,14 @@ defmodule SocialScribe.Bots do
              calendar_event.hangout_link,
              DateTime.add(calendar_event.start_time, -join_minute_offset, :minute)
            ) do
+      status_code =
+        case api_response.status_changes do
+          [first_status | _] -> first_status.code
+          [] -> bot.status
+        end
+
       update_recall_bot(bot, %{
-        status: api_response.status_changes |> List.first() |> Map.get(:code)
+        status: status_code
       })
     end
   end

@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: social_scribe_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: social_scribe_dev
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    container_name: social_scribe_app
+    working_dir: /app
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    environment:
+      # Database Configuration
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_HOST: db
+      DB_NAME: social_scribe_dev
+
+      # Phoenix Configuration
+      PHX_HOST: localhost
+      PHX_SERVER: "true"
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-scEGfw3cvNvWl7suIuAP0pZQV/Ui9NKfs+z1RR8yZn+VbriYPmM/ptxJ2iMhSI8Z}
+
+      # Google OAuth Configuration
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:4000/auth/google/callback}
+
+      # LinkedIn OAuth Configuration
+      LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID}
+      LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET}
+      LINKEDIN_REDIRECT_URI: ${LINKEDIN_REDIRECT_URI:-http://localhost:4000/auth/linkedin/callback}
+
+      # Facebook OAuth Configuration
+      FACEBOOK_CLIENT_ID: ${FACEBOOK_CLIENT_ID}
+      FACEBOOK_CLIENT_SECRET: ${FACEBOOK_CLIENT_SECRET}
+      FACEBOOK_REDIRECT_URI: ${FACEBOOK_REDIRECT_URI:-http://localhost:4000/auth/facebook/callback}
+
+      # Recall.ai Configuration
+      RECALL_API_KEY: ${RECALL_API_KEY}
+      RECALL_REGION: ${RECALL_REGION:-us-west-2}
+
+      # Google Gemini Configuration
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+
+      # Hubspot
+      HUBSPOT_CLIENT_ID: ${HUBSPOT_CLIENT_ID}
+      HUBSPOT_CLIENT_SECRET: ${HUBSPOT_CLIENT_SECRET}
+      HUBSPOT_REDIRECT_URI: ${HUBSPOT_REDIRECT_URI}
+
+      # Mix Environment
+      MIX_ENV: dev
+    volumes:
+      - .:/app
+      - elixir_build:/app/_build
+      - elixir_deps:/app/deps
+      - node_modules:/app/assets/node_modules
+    command: >
+      bash -c "
+        apt-get update -y &&
+        apt-get install -y curl inotify-tools postgresql-client nodejs npm &&
+        mix local.hex --force &&
+        mix local.rebar --force &&
+        mix deps.get &&
+        cd assets && npm install && cd .. &&
+        mix ecto.create &&
+        mix ecto.migrate &&
+        mix phx.server
+      "
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  elixir_build:
+    driver: local
+  elixir_deps:
+    driver: local
+  node_modules:
+    driver: local

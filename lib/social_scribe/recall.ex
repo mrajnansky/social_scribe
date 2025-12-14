@@ -22,7 +22,13 @@ defmodule SocialScribe.Recall do
   def create_bot(meeting_url, join_at) do
     body = %{
       meeting_url: meeting_url,
-      transcription_options: %{provider: "meeting_captions"},
+      recording_config: %{
+        transcript: %{
+          provider: %{
+            meeting_captions: %{}
+          }
+        }
+      },
       join_at: Timex.format!(join_at, "{ISO:Extended}")
     }
 
@@ -46,11 +52,11 @@ defmodule SocialScribe.Recall do
 
   @impl SocialScribe.RecallApi
   def get_bot(recall_bot_id) do
-    Tesla.get(client(), "/bot/#{recall_bot_id}")
+    Tesla.get(client(), "/bot/#{recall_bot_id}/")
   end
 
   @impl SocialScribe.RecallApi
-  def get_bot_transcript(recall_bot_id) do
-    Tesla.get(client(), "/bot/#{recall_bot_id}/transcript")
+  def get_bot_transcript(transcript_id) do
+    Tesla.get(client(), "/transcript/#{transcript_id}/")
   end
 end

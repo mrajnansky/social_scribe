@@ -32,6 +32,11 @@ config :ueberauth, Ueberauth.Strategy.Facebook.OAuth,
   client_secret: System.get_env("FACEBOOK_CLIENT_SECRET"),
   redirect_uri: System.get_env("FACEBOOK_REDIRECT_URI")
 
+config :ueberauth, Ueberauth.Strategy.Hubspot.OAuth,
+  client_id: System.get_env("HUBSPOT_CLIENT_ID"),
+  client_secret: System.get_env("HUBSPOT_CLIENT_SECRET"),
+  redirect_uri: System.get_env("HUBSPOT_REDIRECT_URI")
+
 config :social_scribe, :recall_api_key, System.get_env("RECALL_API_KEY")
 config :social_scribe, :recall_region, System.get_env("RECALL_REGION")
 config :social_scribe, :gemini_api_key, System.get_env("GEMINI_API_KEY")
