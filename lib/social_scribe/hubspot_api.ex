@@ -121,6 +121,41 @@ defmodule SocialScribe.HubspotApi do
     }
   end
 
+  @doc """
+  Updates a contact in HubSpot with new property values.
+
+  ## Parameters
+    - access_token: The HubSpot OAuth access token
+    - contact_id: The HubSpot contact ID
+    - properties: Map of property names to values (e.g., %{"email" => "new@example.com", "jobtitle" => "CEO"})
+
+  ## Returns
+    - {:ok, contact} - Updated contact data
+    - {:error, reason} - Error tuple
+  """
+  def update_contact(access_token, contact_id, properties) when is_map(properties) do
+    url = "#{@hubspot_api_base_url}/crm/v3/objects/contacts/#{contact_id}"
+
+    payload = %{properties: properties}
+    headers = [{"Authorization", "Bearer #{access_token}"}]
+
+    Logger.debug("HubSpot update contact #{contact_id} with properties: #{inspect(properties)}")
+
+    case Tesla.patch(client(), url, payload, headers: headers) do
+      {:ok, %Tesla.Env{status: 200, body: body}} ->
+        Logger.info("Successfully updated HubSpot contact #{contact_id}")
+        {:ok, body}
+
+      {:ok, %Tesla.Env{status: status, body: error_body}} ->
+        Logger.error("Failed to update HubSpot contact: #{status} - #{inspect(error_body)}")
+        {:error, {:api_error, status, error_body}}
+
+      {:error, reason} ->
+        Logger.error("HubSpot API error: #{inspect(reason)}")
+        {:error, {:http_error, reason}}
+    end
+  end
+
   defp format_contact_with_all_properties(contact) do
     properties = Map.get(contact, "properties", %{})
 

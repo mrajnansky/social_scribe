@@ -205,16 +205,13 @@
         <%= if @selected_contact do %>
           <div class="w-full flex items-center gap-2 px-3 py-2 border border-slate-300 rounded-md bg-white">
             <div class="flex items-center gap-2 flex-1">
-              <div class="flex-shrink-0 w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center text-white text-sm font-medium">
+              <div class="flex-shrink-0 w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 text-sm font-medium">
                 {get_initials(@selected_contact.name)}
               </div>
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-medium text-slate-900 truncate">
                   {@selected_contact.name}
                 </p>
-                <%= if @selected_contact[:email] do %>
-                  <p class="text-xs text-slate-500 truncate">{@selected_contact.email}</p>
-                <% end %>
               </div>
             </div>
             <button
@@ -297,10 +294,22 @@
                   class="mt-1 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded"
                 />
                 <div class="flex-1 space-y-3">
+                  <%
+                    current_field = Map.get(@updated_suggestion_fields, to_string(index), Map.get(change, "hubspotField", ""))
+
+                    current_field_label =
+                      get_available_contact_fields()
+                      |> Enum.find_value("", fn {field_key, field_label} ->
+                        if field_key == current_field, do: field_label, else: nil
+                      end)
+
+                    show_mapping = Map.get(@show_field_mapping, to_string(index), false)
+                  %>
+
                   <div class="flex items-center gap-2">
-                    <span class="text-sm font-semibold text-slate-800">
-                      {Map.get(change, "hubspotField", "field")}
-                    </span>
+                    <h3 class="font-semibold text-slate-700">
+                      {current_field_label}
+                    </h3>
                   </div>
 
                   <div class="flex items-center gap-3">
@@ -309,7 +318,8 @@
                         Current Value
                       </label>
                       <%
-                        field_name = Map.get(change, "hubspotField", "")
+                        # Use the updated field name if available, otherwise use original
+                        field_name = Map.get(@updated_suggestion_fields, to_string(index), Map.get(change, "hubspotField", ""))
                         current_value = Map.get(@contact_current_values, field_name, "")
                         has_value = current_value && current_value != ""
                       %>
@@ -320,12 +330,6 @@
                         disabled
                         class={"w-full px-3 py-2 text-sm border border-slate-300 rounded-md bg-slate-100 text-slate-400 #{if has_value, do: "line-through", else: ""}"}
                       />
-                      <button
-                        type="button"
-                        class="mt-1 text-xs text-indigo-600 hover:text-indigo-700 hover:underline"
-                      >
-                        Update mapping
-                      </button>
                     </div>
 
                     <div class="flex-shrink-0 text-slate-400 mt-5">
@@ -349,9 +353,50 @@
                     </div>
                   </div>
 
-                  <div class="flex items-center gap-2 text-xs text-slate-500">
-                    <span>{Map.get(change, "source", "")}</span>
-                  </div>
+                  <%= if show_mapping do %>
+                    <div class="bg-slate-100 p-3 rounded border border-slate-300">
+                      <form phx-change="update_suggestion_field">
+                        <input type="hidden" name="index" value={index} />
+                        <label class="block text-xs font-medium text-slate-600 mb-2">
+                          Select HubSpot Field
+                        </label>
+                        <select
+                          id={"field-select-#{index}"}
+                          name={"field-select-#{index}"}
+                          class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                        >
+                          <%= for {field_key, field_label} <- get_available_contact_fields() do %>
+                            <option value={field_key} selected={field_key == current_field}>
+                              {field_label}
+                            </option>
+                          <% end %>
+                        </select>
+                      </form>
+                      <div class="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          phx-click="toggle_field_mapping"
+                          phx-value-index={index}
+                          class="px-3 py-1 text-xs bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  <% else %>
+                    <div class="flex items-center gap-2">
+                      <button
+                        type="button"
+                        phx-click="toggle_field_mapping"
+                        phx-value-index={index}
+                        class="text-xs text-indigo-600 hover:text-indigo-800 hover:underline"
+                      >
+                        Update mapping
+                      </button>
+                      <span class="text-xs text-slate-500">•</span>
+                      <span class="text-xs text-slate-500">{Map.get(change, "source", "")}</span>
+                    </div>
+                  <% end %>
                 </div>
               </div>
             </div>
@@ -359,6 +404,11 @@
         <% end %>
       <% end %>
 
+      <%
+        has_selected_contact = @selected_contact != nil
+        has_selected_suggestions = Enum.any?(@selected_suggestions, fn {_k, v} -> v end)
+        can_sync = has_selected_contact && has_selected_suggestions
+      %>
       <div class="flex justify-end gap-2 pt-4 border-t">
         <.link
           patch={~p"/dashboard/meetings/#{@meeting}"}
@@ -368,10 +418,19 @@
         </.link>
         <button
           type="button"
-          class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-          disabled
+          phx-click="sync_to_hubspot"
+          disabled={!can_sync}
+          class={"inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white #{if can_sync, do: "bg-indigo-600 hover:bg-indigo-700 cursor-pointer", else: "bg-slate-400 cursor-not-allowed"}"}
         >
-          Sync to HubSpot (Coming Soon)
+          <%= if !has_selected_contact do %>
+            Select a contact first
+          <% else %>
+            <%= if !has_selected_suggestions do %>
+              Select changes to sync
+            <% else %>
+              Sync to HubSpot
+            <% end %>
+          <% end %>
         </button>
       </div>
     <% else %>

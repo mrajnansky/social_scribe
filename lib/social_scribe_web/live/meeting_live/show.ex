@@ -51,6 +51,8 @@ defmodule SocialScribeWeb.MeetingLive.Show do
         |> assign(:contact_current_values, %{})
         |> assign(:selected_suggestions, %{})
         |> assign(:updated_suggestion_values, %{})
+        |> assign(:updated_suggestion_fields, %{})
+        |> assign(:show_field_mapping, %{})
         |> assign(
           :follow_up_email_form,
           to_form(%{
@@ -254,6 +256,118 @@ defmodule SocialScribeWeb.MeetingLive.Show do
     {:noreply, assign(socket, :updated_suggestion_values, updated_values)}
   end
 
+  @impl true
+  def handle_event("update_suggestion_field", params, socket) do
+    Logger.info("update_suggestion_field params: #{inspect(params)}")
+
+    index = Map.get(params, "index")
+
+    # Extract the field value from params
+    field = Map.get(params, "field-select-#{index}")
+
+    Logger.info("Updating field for index #{index} to #{field}")
+
+    updated_fields = Map.put(socket.assigns.updated_suggestion_fields, index, field)
+
+    # Close the dropdown after selection
+    show_field_mapping = Map.put(socket.assigns.show_field_mapping, index, false)
+
+    socket =
+      socket
+      |> assign(:updated_suggestion_fields, updated_fields)
+      |> assign(:show_field_mapping, show_field_mapping)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("toggle_field_mapping", %{"index" => index}, socket) do
+    show_field_mapping = socket.assigns.show_field_mapping
+    current_value = Map.get(show_field_mapping, index, false)
+
+    updated_mapping = Map.put(show_field_mapping, index, !current_value)
+
+    {:noreply, assign(socket, :show_field_mapping, updated_mapping)}
+  end
+
+  @impl true
+  def handle_event("sync_to_hubspot", _params, socket) do
+    contact_id = socket.assigns.selected_contact.id
+    selected_suggestions = socket.assigns.selected_suggestions
+    updated_values = socket.assigns.updated_suggestion_values
+    updated_fields = socket.assigns.updated_suggestion_fields
+    contact_suggestions = socket.assigns.contact_suggestions
+
+    # Get all suggestions from the first (and only) suggestion record
+    all_suggestions =
+      contact_suggestions
+      |> List.first()
+      |> case do
+        nil -> []
+        record -> Map.get(record, :suggestions, [])
+      end
+
+    # Build properties map from selected suggestions
+    properties =
+      selected_suggestions
+      |> Enum.filter(fn {_index, selected} -> selected end)
+      |> Enum.reduce(%{}, fn {index_str, _selected}, acc ->
+        index = String.to_integer(index_str)
+        suggestion = Enum.at(all_suggestions, index)
+
+        if suggestion do
+          # Use updated field name if available, otherwise use original
+          field_name = Map.get(updated_fields, index_str, Map.get(suggestion, "hubspotField"))
+          # Use updated value if available, otherwise use original suggestion value
+          value = Map.get(updated_values, index_str, Map.get(suggestion, "value"))
+          # Convert nil to empty string, keep everything else as-is (including empty strings)
+          final_value = if is_nil(value), do: "", else: value
+          Map.put(acc, field_name, final_value)
+        else
+          acc
+        end
+      end)
+
+    if map_size(properties) == 0 do
+      socket =
+        socket
+        |> put_flash(:error, "No contact fields selected. Please select at least one contact field to sync.")
+
+      {:noreply, socket}
+    else
+      case ensure_valid_hubspot_token(socket.assigns.hubspot_credential) do
+        {:ok, access_token, _updated_credential} ->
+          case HubspotApi.update_contact(access_token, contact_id, properties) do
+            {:ok, _updated_contact} ->
+              socket =
+                socket
+                |> put_flash(:info, "Successfully synced #{map_size(properties)} field(s) to HubSpot!")
+                |> push_navigate(to: ~p"/dashboard/meetings/#{socket.assigns.meeting}")
+
+              {:noreply, socket}
+
+            {:error, reason} ->
+              Logger.error("Failed to sync to HubSpot: #{inspect(reason)}")
+
+              socket =
+                socket
+                |> put_flash(:error, "Failed to sync to HubSpot. Please try again.")
+
+              {:noreply, socket}
+          end
+
+        {:error, reason} ->
+          Logger.error("Failed to get valid token for sync: #{inspect(reason)}")
+
+          socket =
+            socket
+            |> put_flash(:error, "Failed to authenticate with HubSpot. Please try reconnecting.")
+
+          {:noreply, socket}
+      end
+    end
+  end
+
   defp format_duration(nil), do: "N/A"
 
   defp format_duration(seconds) when is_integer(seconds) do
@@ -278,6 +392,58 @@ defmodule SocialScribeWeb.MeetingLive.Show do
   end
 
   defp get_initials(_), do: "?"
+
+  defp format_field_name(field_key) do
+    case field_key do
+      "email" -> "Email"
+      "phone" -> "Phone"
+      "mobilephone" -> "Mobile Phone"
+      "jobtitle" -> "Job Title"
+      "company" -> "Company"
+      "industry" -> "Industry"
+      "city" -> "City"
+      "state" -> "State"
+      "country" -> "Country"
+      "website" -> "Website"
+      "linkedin_url" -> "LinkedIn URL"
+      "twitter_handle" -> "Twitter Handle"
+      "notes" -> "Notes"
+      "hs_lead_status" -> "Lead Status"
+      "firstname" -> "First Name"
+      "lastname" -> "Last Name"
+      # Account fields
+      "name" -> "Company Name"
+      "domain" -> "Domain"
+      "type" -> "Company Type"
+      "zip" -> "Zip Code"
+      "numberofemployees" -> "Number of Employees"
+      "annualrevenue" -> "Annual Revenue"
+      "description" -> "Description"
+      # Default: title case the field key
+      _ -> field_key |> String.split("_") |> Enum.map(&String.capitalize/1) |> Enum.join(" ")
+    end
+  end
+
+  defp get_available_contact_fields do
+    [
+      {"email", "Email"},
+      {"phone", "Phone"},
+      {"mobilephone", "Mobile Phone"},
+      {"jobtitle", "Job Title"},
+      {"company", "Company"},
+      {"industry", "Industry"},
+      {"city", "City"},
+      {"state", "State"},
+      {"country", "Country"},
+      {"website", "Website"},
+      {"linkedin_url", "LinkedIn URL"},
+      {"twitter_handle", "Twitter Handle"},
+      {"firstname", "First Name"},
+      {"lastname", "Last Name"},
+      {"notes", "Notes"},
+      {"hs_lead_status", "Lead Status"}
+    ]
+  end
 
   attr :meeting_transcript, :map, required: true
 
