@@ -53,6 +53,60 @@ defmodule SocialScribe.HubspotApi do
     end
   end
 
+  @doc """
+  Gets a contact by ID from HubSpot.
+
+  ## Parameters
+    - access_token: The HubSpot OAuth access token
+    - contact_id: The HubSpot contact ID
+
+  ## Returns
+    - {:ok, contact} - Contact map with properties
+    - {:error, reason} - Error tuple
+  """
+  def get_contact(access_token, contact_id) do
+    url = "#{@hubspot_api_base_url}/crm/v3/objects/contacts/#{contact_id}"
+
+    # Request all common properties
+    properties = [
+      "firstname",
+      "lastname",
+      "email",
+      "phone",
+      "mobilephone",
+      "company",
+      "jobtitle",
+      "industry",
+      "city",
+      "state",
+      "country",
+      "website",
+      "linkedin_url",
+      "twitter_handle",
+      "notes",
+      "hs_lead_status"
+    ]
+
+    params = [properties: Enum.join(properties, ",")]
+    headers = [{"Authorization", "Bearer #{access_token}"}]
+
+    Logger.debug("HubSpot get contact request for ID: #{contact_id}")
+
+    case Tesla.get(client(), url, query: params, headers: headers) do
+      {:ok, %Tesla.Env{status: 200, body: body}} ->
+        contact = format_contact_with_all_properties(body)
+        Logger.debug("HubSpot get contact response: #{inspect(contact)}")
+        {:ok, contact}
+
+      {:ok, %Tesla.Env{status: status, body: error_body}} ->
+        {:error, {:api_error, status, error_body}}
+
+      {:error, reason} ->
+        Logger.error("HubSpot API error: #{inspect(reason)}")
+        {:error, {:http_error, reason}}
+    end
+  end
+
   defp format_contact(contact) do
     properties = Map.get(contact, "properties", %{})
     firstname = Map.get(properties, "firstname", "")
@@ -64,6 +118,15 @@ defmodule SocialScribe.HubspotApi do
       email: Map.get(properties, "email"),
       company: Map.get(properties, "company"),
       jobtitle: Map.get(properties, "jobtitle")
+    }
+  end
+
+  defp format_contact_with_all_properties(contact) do
+    properties = Map.get(contact, "properties", %{})
+
+    %{
+      id: Map.get(contact, "id"),
+      properties: properties
     }
   end
 

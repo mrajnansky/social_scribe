@@ -48,6 +48,9 @@ defmodule SocialScribeWeb.MeetingLive.Show do
         |> assign(:hubspot_credential, hubspot_credential)
         |> assign(:selected_contact, nil)
         |> assign(:contact_search_results, [])
+        |> assign(:contact_current_values, %{})
+        |> assign(:selected_suggestions, %{})
+        |> assign(:updated_suggestion_values, %{})
         |> assign(
           :follow_up_email_form,
           to_form(%{
@@ -155,16 +158,41 @@ defmodule SocialScribeWeb.MeetingLive.Show do
 
   @impl true
   def handle_event("select_contact", params, socket) do
+    contact_id = Map.get(params, "contact_id")
+
     selected_contact = %{
-      id: Map.get(params, "contact_id"),
+      id: contact_id,
       name: Map.get(params, "contact_name", ""),
       email: Map.get(params, "contact_email")
     }
+
+    # Fetch full contact details from HubSpot to get current values
+    contact_properties =
+      if socket.assigns.hubspot_credential do
+        case ensure_valid_hubspot_token(socket.assigns.hubspot_credential) do
+          {:ok, access_token, _updated_credential} ->
+            case HubspotApi.get_contact(access_token, contact_id) do
+              {:ok, contact_data} ->
+                Map.get(contact_data, :properties, %{})
+
+              {:error, reason} ->
+                Logger.error("Failed to fetch contact details: #{inspect(reason)}")
+                %{}
+            end
+
+          {:error, reason} ->
+            Logger.error("Failed to get valid token: #{inspect(reason)}")
+            %{}
+        end
+      else
+        %{}
+      end
 
     socket =
       socket
       |> assign(:selected_contact, selected_contact)
       |> assign(:contact_search_results, [])
+      |> assign(:contact_current_values, contact_properties)
 
     {:noreply, socket}
   end
@@ -174,6 +202,7 @@ defmodule SocialScribeWeb.MeetingLive.Show do
     socket =
       socket
       |> assign(:selected_contact, nil)
+      |> assign(:contact_current_values, %{})
 
     {:noreply, socket}
   end
@@ -206,6 +235,23 @@ defmodule SocialScribeWeb.MeetingLive.Show do
 
         {:noreply, socket}
     end
+  end
+
+  @impl true
+  def handle_event("toggle_suggestion", %{"index" => index}, socket) do
+    selected_suggestions = socket.assigns.selected_suggestions
+    current_value = Map.get(selected_suggestions, index, false)
+
+    updated_selections = Map.put(selected_suggestions, index, !current_value)
+
+    {:noreply, assign(socket, :selected_suggestions, updated_selections)}
+  end
+
+  @impl true
+  def handle_event("update_suggestion_value", %{"index" => index, "value" => value}, socket) do
+    updated_values = Map.put(socket.assigns.updated_suggestion_values, index, value)
+
+    {:noreply, assign(socket, :updated_suggestion_values, updated_values)}
   end
 
   defp format_duration(nil), do: "N/A"

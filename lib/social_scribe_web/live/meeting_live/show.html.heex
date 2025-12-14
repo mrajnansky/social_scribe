@@ -282,27 +282,75 @@
     <%= if Enum.any?(@contact_suggestions) do %>
       <%= for suggestion_record <- @contact_suggestions do %>
         <%= if Enum.any?(suggestion_record.suggestions) do %>
-          <div class="space-y-4 max-h-96 overflow-y-auto">
-            <div class="space-y-2">
-              <div
-                :for={change <- suggestion_record.suggestions}
-                class="bg-white rounded p-3 border border-slate-200"
-              >
-                <div class="flex items-start gap-2">
-                  <span class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-slate-100 text-slate-700">
-                    {Map.get(change, "type", "contact")}
-                  </span>
-                  <div class="flex-1">
-                    <p class="text-sm font-medium text-slate-700">
-                      {Map.get(change, "hubspotField", "field")}:
-                    </p>
-                    <p class="text-sm text-slate-900 mt-1">
-                      {Map.get(change, "value", "")}
-                    </p>
-                    <p class="text-xs text-slate-500 mt-1">
-                      Confidence: {Map.get(change, "confidence", "unknown")} •
-                      {Map.get(change, "source", "")}
-                    </p>
+          <div class="space-y-3 max-h-96 overflow-y-auto">
+            <div
+              :for={{change, index} <- Enum.with_index(suggestion_record.suggestions)}
+              class="bg-slate-50 rounded-lg p-4 border border-slate-200"
+            >
+              <div class="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id={"suggestion-#{index}"}
+                  phx-click="toggle_suggestion"
+                  phx-value-index={index}
+                  checked={Map.get(@selected_suggestions || %{}, to_string(index), false)}
+                  class="mt-1 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded"
+                />
+                <div class="flex-1 space-y-3">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm font-semibold text-slate-800">
+                      {Map.get(change, "hubspotField", "field")}
+                    </span>
+                  </div>
+
+                  <div class="flex items-center gap-3">
+                    <div class="flex-1">
+                      <label class="block text-xs font-medium text-slate-600 mb-1">
+                        Current Value
+                      </label>
+                      <%
+                        field_name = Map.get(change, "hubspotField", "")
+                        current_value = Map.get(@contact_current_values, field_name, "")
+                        has_value = current_value && current_value != ""
+                      %>
+                      <input
+                        type="text"
+                        value={current_value}
+                        placeholder="(empty)"
+                        disabled
+                        class={"w-full px-3 py-2 text-sm border border-slate-300 rounded-md bg-slate-100 text-slate-400 #{if has_value, do: "line-through", else: ""}"}
+                      />
+                      <button
+                        type="button"
+                        class="mt-1 text-xs text-indigo-600 hover:text-indigo-700 hover:underline"
+                      >
+                        Update mapping
+                      </button>
+                    </div>
+
+                    <div class="flex-shrink-0 text-slate-400 mt-5">
+                      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+                      </svg>
+                    </div>
+
+                    <div class="flex-1">
+                      <label class="block text-xs font-medium text-slate-600 mb-1">
+                        New Value
+                      </label>
+                      <input
+                        type="text"
+                        id={"suggestion-value-#{index}"}
+                        phx-blur="update_suggestion_value"
+                        phx-value-index={index}
+                        value={Map.get(change, "value", "")}
+                        class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-2 text-xs text-slate-500">
+                    <span>{Map.get(change, "source", "")}</span>
                   </div>
                 </div>
               </div>
