@@ -156,6 +156,38 @@ defmodule SocialScribe.HubspotApi do
     end
   end
 
+  @doc """
+  Gets all contact property definitions from HubSpot.
+
+  ## Parameters
+    - access_token: The HubSpot OAuth access token
+
+  ## Returns
+    - {:ok, properties} - List of property definition maps
+    - {:error, reason} - Error tuple
+  """
+  def get_contact_properties(access_token) do
+    url = "#{@hubspot_api_base_url}/crm/v3/properties/contacts"
+
+    headers = [{"Authorization", "Bearer #{access_token}"}]
+
+    Logger.debug("HubSpot get contact properties request")
+
+    case Tesla.get(client(), url, headers: headers) do
+      {:ok, %Tesla.Env{status: 200, body: body}} ->
+        properties = Map.get(body, "results", [])
+        Logger.debug("HubSpot contact properties count: #{length(properties)}")
+        {:ok, properties}
+
+      {:ok, %Tesla.Env{status: status, body: error_body}} ->
+        {:error, {:api_error, status, error_body}}
+
+      {:error, reason} ->
+        Logger.error("HubSpot API error: #{inspect(reason)}")
+        {:error, {:http_error, reason}}
+    end
+  end
+
   defp format_contact_with_all_properties(contact) do
     properties = Map.get(contact, "properties", %{})
 

@@ -46,12 +46,15 @@ defmodule SocialScribe.AIContentGenerator do
   end
 
   @impl SocialScribe.AIContentGeneratorApi
-  def generate_contact_suggestions_batch(meeting, _participant_names) do
+  def generate_contact_suggestions_batch(meeting, _participant_names, hubspot_fields) do
     case Meetings.generate_prompt_for_meeting(meeting) do
       {:error, reason} ->
         {:error, reason}
 
       {:ok, meeting_prompt} ->
+        # Generate field list from HubSpot properties
+        field_list = generate_field_list(hubspot_fields)
+
         prompt = """
         You are an expert CRM analyst helping to identify contact and account information changes from meeting transcripts for HubSpot.
 
@@ -90,58 +93,10 @@ defmodule SocialScribe.AIContentGenerator do
             "confidence": "high",
             "source": "Jane mentioned company name"
             "transcriptTimestamp": "00:10:45"
-          },
-          {
-            "type": "account",
-            "hubspotField": "industry",
-            "value": "Software",
-            "confidence": "medium",
-            "source": "discussed being in software industry"
-            "transcriptTimestamp": "00:15:30"
-          },
-          {
-            "type": "contact",
-            "hubspotField": "phone",
-            "value": "+1-555-0123",
-            "confidence": "high",
-            "source": "Bob shared contact number"
-            "transcriptTimestamp": "00:20:10"
-          },
-          {
-            "type": "contact",
-            "hubspotField": "notes",
-            "value": "Key decision maker for Q1 budget allocation. Interested in enterprise tier.",
-            "confidence": "high",
-            "source": "discussed throughout meeting"
-            "transcriptTimestamp": "00:25:00"
-          },
-          {
-            "type": "account",
-            "hubspotField": "notes",
-            "value": "Evaluating competitors until March 15. Budget approved for Q1.",
-            "confidence": "high",
-            "source": "discussed deal timeline and budget"
-            "transcriptTimestamp": "00:30:00"
           }
         ]
 
-        Common HubSpot CONTACT fields to extract (use these exact field names):
-        - email, phone, mobilephone
-        - jobtitle, company, industry
-        - city, state, country
-        - website, linkedin_url, twitter_handle
-        - notes (for general insights, next steps, interests, business context)
-        - hs_lead_status (e.g., "NEW", "OPEN", "IN_PROGRESS", "QUALIFIED")
-
-        Common HubSpot ACCOUNT/COMPANY fields to extract (use these exact field names):
-        - name (company name)
-        - domain (company website domain)
-        - industry, type (e.g., "PROSPECT", "PARTNER", "RESELLER")
-        - city, state, country, zip
-        - phone, website
-        - numberofemployees, annualrevenue
-        - notes (deal context, business challenges, opportunities, timeline)
-        - description (company description)
+        #{field_list}
 
         CRITICAL GUIDELINES:
         - Only include factual information directly from the transcript
@@ -161,6 +116,64 @@ defmodule SocialScribe.AIContentGenerator do
 
         call_gemini_json(prompt)
     end
+  end
+
+  defp generate_field_list(hubspot_fields) when is_list(hubspot_fields) and length(hubspot_fields) > 0 do
+    # Filter to only include editable contact fields
+    contact_fields = hubspot_fields
+    |> Enum.filter(fn prop ->
+      modificationMetadata = Map.get(prop, "modificationMetadata", %{})
+      readOnlyValue = Map.get(modificationMetadata, "readOnlyValue", false)
+      hidden = Map.get(prop, "hidden", false)
+      fieldType = Map.get(prop, "fieldType", "")
+
+      !readOnlyValue && !hidden && fieldType in ["text", "textarea", "number", "select", "radio", "checkbox", "date", "datetime", "phonenumber", "file", "booleancheckbox"]
+    end)
+    |> Enum.map(fn prop ->
+      name = Map.get(prop, "name", "")
+      label = Map.get(prop, "label", name)
+      description = Map.get(prop, "description", "")
+      type = Map.get(prop, "type", "")
+
+      if description != "" do
+        "- #{name} (#{label}): #{description}"
+      else
+        "- #{name} (#{label}) [#{type}]"
+      end
+    end)
+    |> Enum.sort()
+    |> Enum.join("\n")
+
+    """
+    Available HubSpot CONTACT fields (use these exact field names):
+    #{contact_fields}
+
+    Note: Focus on extracting information that matches these available fields. If information doesn't clearly fit any field, use the "notes" field for contextual information.
+    """
+  end
+
+  defp generate_field_list(_hubspot_fields) do
+    # Fallback to default fields if HubSpot fields aren't provided
+    """
+    Common HubSpot CONTACT fields to extract (use these exact field names):
+    - email, phone, mobilephone
+    - jobtitle, company, industry
+    - city, state, country
+    - website, linkedin_url, twitter_handle
+    - firstname, lastname
+    - notes (for general insights, next steps, interests, business context)
+    - hs_lead_status (e.g., "NEW", "OPEN", "IN_PROGRESS", "QUALIFIED")
+
+    Common HubSpot ACCOUNT/COMPANY fields to extract (use these exact field names):
+    - name (company name)
+    - domain (company website domain)
+    - industry, type (e.g., "PROSPECT", "PARTNER", "RESELLER")
+    - city, state, country, zip
+    - phone, website
+    - numberofemployees, annualrevenue
+    - notes (deal context, business challenges, opportunities, timeline)
+    - description (company description)
+    """
   end
 
   defp call_gemini(prompt_text) do

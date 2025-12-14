@@ -16,15 +16,16 @@ defmodule SocialScribe.Hubspot do
 
   ## Parameters
     - meeting_id: The ID of the meeting to analyze
+    - user_id: The ID of the user (needed to fetch HubSpot credentials)
 
   ## Examples
 
-      iex> enqueue_contact_suggestions(123)
+      iex> enqueue_contact_suggestions(123, 456)
       {:ok, %Oban.Job{}}
 
   """
-  def enqueue_contact_suggestions(meeting_id) do
-    %{meeting_id: meeting_id}
+  def enqueue_contact_suggestions(meeting_id, user_id) do
+    %{meeting_id: meeting_id, user_id: user_id}
     |> ContactSuggestionsWorker.new()
     |> Oban.insert()
   end

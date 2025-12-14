@@ -9,12 +9,15 @@ defmodule SocialScribe.Workers.ContactSuggestionsWorker do
 
   alias SocialScribe.Meetings
   alias SocialScribe.Hubspot
+  alias SocialScribe.Accounts
+  alias SocialScribe.HubspotApi
+  alias SocialScribe.HubspotTokenRefresher
   alias SocialScribe.AIContentGeneratorApi
 
   require Logger
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"meeting_id" => meeting_id}}) do
+  def perform(%Oban.Job{args: %{"meeting_id" => meeting_id, "user_id" => user_id}}) do
     Logger.info(
       "Starting contact suggestions generation for all participants in meeting_id: #{meeting_id}"
     )
@@ -25,11 +28,66 @@ defmodule SocialScribe.Workers.ContactSuggestionsWorker do
         {:error, :meeting_not_found}
 
       meeting ->
-        process_all_contact_suggestions(meeting)
+        # Fetch HubSpot credentials and available fields
+        hubspot_fields = fetch_hubspot_fields(user_id)
+        process_all_contact_suggestions(meeting, hubspot_fields)
     end
   end
 
-  defp process_all_contact_suggestions(meeting) do
+  defp fetch_hubspot_fields(user_id) do
+    case Accounts.get_user!(user_id) do
+      nil ->
+        Logger.warning("User #{user_id} not found, using default fields")
+        []
+
+      user ->
+        case Accounts.get_user_credential(user, "hubspot") do
+          nil ->
+            Logger.warning("No HubSpot credential found for user #{user_id}, using default fields")
+            []
+
+          credential ->
+            case ensure_valid_hubspot_token(credential) do
+              {:ok, access_token, _updated_credential} ->
+                case HubspotApi.get_contact_properties(access_token) do
+                  {:ok, properties} ->
+                    Logger.info("Fetched #{length(properties)} HubSpot contact properties")
+                    properties
+
+                  {:error, reason} ->
+                    Logger.error("Failed to fetch HubSpot properties: #{inspect(reason)}, using defaults")
+                    []
+                end
+
+              {:error, reason} ->
+                Logger.error("Failed to get valid HubSpot token: #{inspect(reason)}, using defaults")
+                []
+            end
+        end
+    end
+  end
+
+  defp ensure_valid_hubspot_token(credential) do
+    now = DateTime.utc_now()
+    expires_at = credential.expires_at || DateTime.add(now, -1, :second)
+
+    if DateTime.compare(expires_at, DateTime.add(now, 300, :second)) == :lt do
+      case HubspotTokenRefresher.refresh_token(credential.refresh_token) do
+        {:ok, new_token_data} ->
+          {:ok, updated_credential} =
+            Accounts.update_credential_tokens(credential, new_token_data)
+
+          {:ok, updated_credential.token, updated_credential}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:ok, credential.token, nil}
+    end
+  end
+
+  defp process_all_contact_suggestions(meeting, hubspot_fields) do
     if is_nil(meeting.meeting_participants) or Enum.empty?(meeting.meeting_participants) do
       Logger.info("No participants found for meeting #{meeting.id}, skipping contact suggestions")
       :ok
@@ -40,7 +98,7 @@ defmodule SocialScribe.Workers.ContactSuggestionsWorker do
         "Processing suggestions for #{length(participant_names)} participants in meeting #{meeting.id}"
       )
 
-      case AIContentGeneratorApi.generate_contact_suggestions_batch(meeting, participant_names) do
+      case AIContentGeneratorApi.generate_contact_suggestions_batch(meeting, participant_names, hubspot_fields) do
         {:ok, suggestions_json} ->
           Logger.info(
             "Generated #{length(suggestions_json)} contact and account changes for meeting #{meeting.id}"

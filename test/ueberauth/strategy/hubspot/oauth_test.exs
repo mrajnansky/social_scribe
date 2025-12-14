@@ -32,7 +32,7 @@ defmodule Ueberauth.Strategy.Hubspot.OAuthTest do
     end
 
     test "includes custom params in authorize URL" do
-      url = OAuth.authorize_url!([scope: "crm.objects.contacts.read crm.objects.contacts.write"])
+      url = OAuth.authorize_url!([scope: "crm.objects.contacts.read crm.objects.contacts.write crm.objects.contacts.read"])
 
       assert url =~ "scope="
     end

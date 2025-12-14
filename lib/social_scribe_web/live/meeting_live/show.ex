@@ -53,6 +53,8 @@ defmodule SocialScribeWeb.MeetingLive.Show do
         |> assign(:updated_suggestion_values, %{})
         |> assign(:updated_suggestion_fields, %{})
         |> assign(:show_field_mapping, %{})
+        |> assign(:collapsed_fields, %{})
+        |> assign(:hubspot_contact_properties, [])
         |> assign(
           :follow_up_email_form,
           to_form(%{
@@ -79,6 +81,38 @@ defmodule SocialScribeWeb.MeetingLive.Show do
 
   @impl true
   def handle_params(_params, _uri, socket) do
+    # Fetch HubSpot contact properties when modal opens
+    socket =
+      if socket.assigns[:live_action] == :contact_suggestions &&
+           socket.assigns.hubspot_credential &&
+           Enum.empty?(socket.assigns.hubspot_contact_properties) do
+        case ensure_valid_hubspot_token(socket.assigns.hubspot_credential) do
+          {:ok, access_token, updated_credential} ->
+            # Update socket with new credential if it was refreshed
+            new_socket =
+              if updated_credential do
+                assign(socket, :hubspot_credential, updated_credential)
+              else
+                socket
+              end
+
+            case HubspotApi.get_contact_properties(access_token) do
+              {:ok, properties} ->
+                assign(new_socket, :hubspot_contact_properties, properties)
+
+              {:error, reason} ->
+                Logger.error("Failed to fetch HubSpot contact properties: #{inspect(reason)}")
+                new_socket
+            end
+
+          {:error, reason} ->
+            Logger.error("Failed to ensure valid HubSpot token: #{inspect(reason)}")
+            socket
+        end
+      else
+        socket
+      end
+
     {:noreply, socket}
   end
 
@@ -221,7 +255,7 @@ defmodule SocialScribeWeb.MeetingLive.Show do
   @impl true
   def handle_event("generate_suggestions", %{"contact_name" => _contact_name}, socket) do
     # Enqueue job to generate contact and account changes
-    case Hubspot.enqueue_contact_suggestions(socket.assigns.meeting.id) do
+    case Hubspot.enqueue_contact_suggestions(socket.assigns.meeting.id, socket.assigns.current_user.id) do
       {:ok, _job} ->
         socket =
           socket
@@ -247,6 +281,54 @@ defmodule SocialScribeWeb.MeetingLive.Show do
     updated_selections = Map.put(selected_suggestions, index, !current_value)
 
     {:noreply, assign(socket, :selected_suggestions, updated_selections)}
+  end
+
+  @impl true
+  def handle_event("toggle_field", %{"field" => field_key}, socket) do
+    contact_suggestions = socket.assigns.contact_suggestions
+    updated_suggestion_fields = socket.assigns.updated_suggestion_fields
+
+    # Get all suggestions from the first (and only) suggestion record
+    all_suggestions =
+      contact_suggestions
+      |> List.first()
+      |> case do
+        nil -> []
+        record -> Map.get(record, :suggestions, [])
+      end
+
+    # Find all indices for this field
+    indices_for_field =
+      all_suggestions
+      |> Enum.with_index()
+      |> Enum.filter(fn {change, index} ->
+        current_field = Map.get(updated_suggestion_fields, to_string(index), Map.get(change, "hubspotField", ""))
+        current_field == field_key
+      end)
+      |> Enum.map(fn {_change, index} -> to_string(index) end)
+
+    # Check if all are currently selected
+    all_selected = Enum.all?(indices_for_field, fn idx ->
+      Map.get(socket.assigns.selected_suggestions, idx, false)
+    end)
+
+    # Toggle all - if all are selected, deselect all; otherwise select all
+    updated_selections =
+      Enum.reduce(indices_for_field, socket.assigns.selected_suggestions, fn idx, acc ->
+        Map.put(acc, idx, !all_selected)
+      end)
+
+    {:noreply, assign(socket, :selected_suggestions, updated_selections)}
+  end
+
+  @impl true
+  def handle_event("toggle_field_collapse", %{"field" => field_key}, socket) do
+    collapsed_fields = socket.assigns.collapsed_fields
+    current_value = Map.get(collapsed_fields, field_key, false)
+
+    updated_collapsed = Map.put(collapsed_fields, field_key, !current_value)
+
+    {:noreply, assign(socket, :collapsed_fields, updated_collapsed)}
   end
 
   @impl true
@@ -424,25 +506,49 @@ defmodule SocialScribeWeb.MeetingLive.Show do
     end
   end
 
-  defp get_available_contact_fields do
-    [
-      {"email", "Email"},
-      {"phone", "Phone"},
-      {"mobilephone", "Mobile Phone"},
-      {"jobtitle", "Job Title"},
-      {"company", "Company"},
-      {"industry", "Industry"},
-      {"city", "City"},
-      {"state", "State"},
-      {"country", "Country"},
-      {"website", "Website"},
-      {"linkedin_url", "LinkedIn URL"},
-      {"twitter_handle", "Twitter Handle"},
-      {"firstname", "First Name"},
-      {"lastname", "Last Name"},
-      {"notes", "Notes"},
-      {"hs_lead_status", "Lead Status"}
-    ]
+  defp get_available_contact_fields(hubspot_properties \\ []) do
+    if Enum.empty?(hubspot_properties) do
+      # Fallback to default fields if HubSpot properties aren't loaded
+      [
+        {"email", "Email"},
+        {"phone", "Phone"},
+        {"mobilephone", "Mobile Phone"},
+        {"jobtitle", "Job Title"},
+        {"company", "Company"},
+        {"industry", "Industry"},
+        {"city", "City"},
+        {"state", "State"},
+        {"country", "Country"},
+        {"website", "Website"},
+        {"linkedin_url", "LinkedIn URL"},
+        {"twitter_handle", "Twitter Handle"},
+        {"firstname", "First Name"},
+        {"lastname", "Last Name"},
+        {"notes", "Notes"},
+        {"hs_lead_status", "Lead Status"}
+      ]
+    else
+      # Filter and format HubSpot properties
+      hubspot_properties
+      |> Enum.filter(fn prop ->
+        # Only include properties that:
+        # 1. Are not read-only
+        # 2. Are not hidden
+        # 3. Are relevant field types (string, number, enumeration, date, etc.)
+        modificationMetadata = Map.get(prop, "modificationMetadata", %{})
+        readOnlyValue = Map.get(modificationMetadata, "readOnlyValue", false)
+        hidden = Map.get(prop, "hidden", false)
+        fieldType = Map.get(prop, "fieldType", "")
+
+        !readOnlyValue && !hidden && fieldType in ["text", "textarea", "number", "select", "radio", "checkbox", "date", "datetime", "phonenumber", "file", "booleancheckbox"]
+      end)
+      |> Enum.map(fn prop ->
+        name = Map.get(prop, "name", "")
+        label = Map.get(prop, "label", name)
+        {name, label}
+      end)
+      |> Enum.sort_by(fn {_name, label} -> label end)
+    end
   end
 
   attr :meeting_transcript, :map, required: true

@@ -113,19 +113,8 @@
                 <div>
                   <h3 class="font-semibold text-slate-700">Contact & Account Changes</h3>
                   <p class="text-sm text-slate-500 mt-1">
-                    {length(suggestion.suggestions)} change(s) detected •
-                    <span class="capitalize">{suggestion.status}</span>
+                    {length(suggestion.suggestions)} change(s) detected
                   </p>
-                  <%= if Enum.any?(suggestion.suggestions) do %>
-                    <div class="mt-2 flex gap-2">
-                      <span class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded bg-blue-50 text-blue-700">
-                        {Enum.count(suggestion.suggestions, &(Map.get(&1, "type") == "contact"))} contact
-                      </span>
-                      <span class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded bg-green-50 text-green-700">
-                        {Enum.count(suggestion.suggestions, &(Map.get(&1, "type") == "account"))} account
-                      </span>
-                    </div>
-                  <% end %>
                 </div>
               </div>
             </div>
@@ -279,127 +268,159 @@
     <%= if Enum.any?(@contact_suggestions) do %>
       <%= for suggestion_record <- @contact_suggestions do %>
         <%= if Enum.any?(suggestion_record.suggestions) do %>
+          <%
+            # Group suggestions by field
+            grouped_suggestions = suggestion_record.suggestions
+            |> Enum.with_index()
+            |> Enum.group_by(fn {change, index} ->
+              Map.get(@updated_suggestion_fields, to_string(index), Map.get(change, "hubspotField", ""))
+            end)
+          %>
           <div class="space-y-3 max-h-96 overflow-y-auto">
-            <div
-              :for={{change, index} <- Enum.with_index(suggestion_record.suggestions)}
-              class="bg-slate-50 rounded-lg p-4 border border-slate-200"
-            >
-              <div class="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  id={"suggestion-#{index}"}
-                  phx-click="toggle_suggestion"
-                  phx-value-index={index}
-                  checked={Map.get(@selected_suggestions || %{}, to_string(index), false)}
-                  class="mt-1 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded"
-                />
-                <div class="flex-1 space-y-3">
-                  <%
-                    current_field = Map.get(@updated_suggestion_fields, to_string(index), Map.get(change, "hubspotField", ""))
+            <%= for {field_key, changes_with_indices} <- grouped_suggestions do %>
+              <%
+                field_label = get_available_contact_fields(@hubspot_contact_properties)
+                |> Enum.find_value("", fn {fk, fl} ->
+                  if fk == field_key, do: fl, else: nil
+                end)
 
-                    current_field_label =
-                      get_available_contact_fields()
-                      |> Enum.find_value("", fn {field_key, field_label} ->
-                        if field_key == current_field, do: field_label, else: nil
-                      end)
-
-                    show_mapping = Map.get(@show_field_mapping, to_string(index), false)
-                  %>
-
-                  <div class="flex items-center gap-2">
-                    <h3 class="font-semibold text-slate-700">
-                      {current_field_label}
-                    </h3>
+                indices = Enum.map(changes_with_indices, fn {_, idx} -> to_string(idx) end)
+                selected_count = Enum.count(indices, fn idx ->
+                  Map.get(@selected_suggestions || %{}, idx, false)
+                end)
+                total_count = length(indices)
+                all_selected = selected_count == total_count && total_count > 0
+                some_selected = selected_count > 0 && selected_count < total_count
+                field_collapsed = Map.get(@collapsed_fields || %{}, field_key, false)
+              %>
+              <div class="bg-slate-50 rounded-lg">
+                <div class="p-4 flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id={"field-#{field_key}"}
+                    phx-click="toggle_field"
+                    phx-value-field={field_key}
+                    checked={all_selected}
+                    class={"h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded #{if some_selected, do: "indeterminate", else: ""}"}
+                  />
+                  <div class="flex-1">
+                    <h3 class="font-semibold text-slate-700">{field_label}</h3>
                   </div>
-
-                  <div class="flex items-center gap-3">
-                    <div class="flex-1">
-                      <label class="block text-xs font-medium text-slate-600 mb-1">
-                        Current Value
-                      </label>
-                      <%
-                        # Use the updated field name if available, otherwise use original
-                        field_name = Map.get(@updated_suggestion_fields, to_string(index), Map.get(change, "hubspotField", ""))
-                        current_value = Map.get(@contact_current_values, field_name, "")
-                        has_value = current_value && current_value != ""
-                      %>
-                      <input
-                        type="text"
-                        value={current_value}
-                        placeholder="(empty)"
-                        disabled
-                        class={"w-full px-3 py-2 text-sm border border-slate-300 rounded-md bg-slate-100 text-slate-400 #{if has_value, do: "line-through", else: ""}"}
-                      />
-                    </div>
-
-                    <div class="flex-shrink-0 text-slate-400 mt-5">
-                      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
-                      </svg>
-                    </div>
-
-                    <div class="flex-1">
-                      <label class="block text-xs font-medium text-slate-600 mb-1">
-                        New Value
-                      </label>
-                      <input
-                        type="text"
-                        id={"suggestion-value-#{index}"}
-                        phx-blur="update_suggestion_value"
-                        phx-value-index={index}
-                        value={Map.get(change, "value", "")}
-                        class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      />
-                    </div>
-                  </div>
-
-                  <%= if show_mapping do %>
-                    <div class="bg-slate-100 p-3 rounded border border-slate-300">
-                      <form phx-change="update_suggestion_field">
-                        <input type="hidden" name="index" value={index} />
-                        <label class="block text-xs font-medium text-slate-600 mb-2">
-                          Select HubSpot Field
-                        </label>
-                        <select
-                          id={"field-select-#{index}"}
-                          name={"field-select-#{index}"}
-                          class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-                        >
-                          <%= for {field_key, field_label} <- get_available_contact_fields() do %>
-                            <option value={field_key} selected={field_key == current_field}>
-                              {field_label}
-                            </option>
-                          <% end %>
-                        </select>
-                      </form>
-                      <div class="mt-2 flex gap-2">
-                        <button
-                          type="button"
-                          phx-click="toggle_field_mapping"
-                          phx-value-index={index}
-                          class="px-3 py-1 text-xs bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  <% else %>
-                    <div class="flex items-center gap-2">
-                      <button
-                        type="button"
-                        phx-click="toggle_field_mapping"
-                        phx-value-index={index}
-                        class="text-xs text-indigo-600 hover:text-indigo-800 hover:underline"
-                      >
-                        Update mapping
-                      </button>
-                      <span class="text-xs text-slate-500">•</span>
-                      <span class="text-xs text-slate-500">{Map.get(change, "source", "")}</span>
-                    </div>
-                  <% end %>
+                  <span class="px-2 py-1 text-xs font-medium bg-slate-200 text-slate-700 rounded">
+                    {selected_count} of {total_count} selected
+                  </span>
+                  <button
+                    type="button"
+                    phx-click="toggle_field_collapse"
+                    phx-value-field={field_key}
+                    class="text-sm text-slate-600 hover:text-slate-800 hover:underline"
+                  >
+                    <%= if field_collapsed, do: "Show details", else: "Hide details" %>
+                  </button>
                 </div>
+
+                <%= if !field_collapsed do %>
+                  <div class="px-4 pb-4 space-y-3 pt-3">
+                    <%= for {change, index} <- changes_with_indices do %>
+                      <%
+                        current_field = Map.get(@updated_suggestion_fields, to_string(index), Map.get(change, "hubspotField", ""))
+                        show_mapping = Map.get(@show_field_mapping, to_string(index), false)
+                      %>
+                      <div class="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          id={"suggestion-#{index}"}
+                          phx-click="toggle_suggestion"
+                          phx-value-index={index}
+                          checked={Map.get(@selected_suggestions || %{}, to_string(index), false)}
+                          class="mt-1 h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-slate-300 rounded"
+                        />
+                        <div class="flex-1 space-y-3">
+                          <div class="flex items-center gap-3">
+                            <div class="flex-1">
+                              <%
+                                field_name = Map.get(@updated_suggestion_fields, to_string(index), Map.get(change, "hubspotField", ""))
+                                current_value = Map.get(@contact_current_values, field_name, "")
+                                has_value = current_value && current_value != ""
+                              %>
+                              <input
+                                type="text"
+                                value={current_value}
+                                placeholder="(empty)"
+                                disabled
+                                class={"w-full px-3 py-2 text-sm border border-slate-300 rounded-md bg-slate-100 text-slate-400 #{if has_value, do: "line-through", else: ""}"}
+                              />
+                            </div>
+
+                            <div class="flex-shrink-0 text-slate-400 mt-5">
+                              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+                              </svg>
+                            </div>
+
+                            <div class="flex-1">
+                              <input
+                                type="text"
+                                id={"suggestion-value-#{index}"}
+                                phx-blur="update_suggestion_value"
+                                phx-value-index={index}
+                                value={Map.get(change, "value", "")}
+                                class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                              />
+                            </div>
+                          </div>
+
+                          <%= if show_mapping do %>
+                            <div class="bg-slate-100 p-3 rounded border border-slate-300">
+                              <form phx-change="update_suggestion_field">
+                                <input type="hidden" name="index" value={index} />
+                                <label class="block text-xs font-medium text-slate-600 mb-2">
+                                  Select HubSpot Field
+                                </label>
+                                <select
+                                  id={"field-select-#{index}"}
+                                  name={"field-select-#{index}"}
+                                  class="w-full px-3 py-2 text-sm border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white"
+                                >
+                                  <%= for {fk, fl} <- get_available_contact_fields(@hubspot_contact_properties) do %>
+                                    <option value={fk} selected={fk == current_field}>
+                                      {fl}
+                                    </option>
+                                  <% end %>
+                                </select>
+                              </form>
+                              <div class="mt-2 flex gap-2">
+                                <button
+                                  type="button"
+                                  phx-click="toggle_field_mapping"
+                                  phx-value-index={index}
+                                  class="px-3 py-1 text-xs bg-white border border-slate-300 text-slate-700 rounded hover:bg-slate-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          <% else %>
+                            <div class="flex items-center gap-2">
+                              <button
+                                type="button"
+                                phx-click="toggle_field_mapping"
+                                phx-value-index={index}
+                                class="text-xs text-indigo-600 hover:text-indigo-800 hover:underline"
+                              >
+                                Update mapping
+                              </button>
+                              <span class="text-xs text-slate-500">•</span>
+                              <span class="text-xs text-slate-500">{Map.get(change, "source", "")}</span>
+                            </div>
+                          <% end %>
+                        </div>
+                      </div>
+                    <% end %>
+                  </div>
+                <% end %>
               </div>
-            </div>
+            <% end %>
           </div>
         <% end %>
       <% end %>
@@ -408,30 +429,38 @@
         has_selected_contact = @selected_contact != nil
         has_selected_suggestions = Enum.any?(@selected_suggestions, fn {_k, v} -> v end)
         can_sync = has_selected_contact && has_selected_suggestions
+        selected_count = Enum.count(@selected_suggestions, fn {_k, v} -> v end)
       %>
-      <div class="flex justify-end gap-2 pt-4 border-t">
-        <.link
-          patch={~p"/dashboard/meetings/#{@meeting}"}
-          class="inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50"
-        >
-          Close
-        </.link>
-        <button
-          type="button"
-          phx-click="sync_to_hubspot"
-          disabled={!can_sync}
-          class={"inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white #{if can_sync, do: "bg-indigo-600 hover:bg-indigo-700 cursor-pointer", else: "bg-slate-400 cursor-not-allowed"}"}
-        >
-          <%= if !has_selected_contact do %>
-            Select a contact first
-          <% else %>
-            <%= if !has_selected_suggestions do %>
-              Select changes to sync
-            <% else %>
-              Sync to HubSpot
-            <% end %>
+      <div class="flex justify-between items-center gap-4 pt-4 border-t">
+        <div class="text-sm text-slate-600">
+          <%= if selected_count > 0 do %>
+            <span class="font-medium">{selected_count}</span> field<%= if selected_count != 1, do: "s" %> in <span class="font-medium">1</span> integration to update
           <% end %>
-        </button>
+        </div>
+        <div class="flex gap-2">
+          <.link
+            patch={~p"/dashboard/meetings/#{@meeting}"}
+            class="inline-flex items-center px-4 py-2 border border-slate-300 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50"
+          >
+            Cancel
+          </.link>
+          <button
+            type="button"
+            phx-click="sync_to_hubspot"
+            disabled={!can_sync}
+            class={"inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white #{if can_sync, do: "bg-green-600 hover:bg-green-700 cursor-pointer", else: "bg-slate-400 cursor-not-allowed"}"}
+          >
+            <%= if !has_selected_contact do %>
+              Select a contact first
+            <% else %>
+              <%= if !has_selected_suggestions do %>
+                Select changes to update
+              <% else %>
+                Update HubSpot
+              <% end %>
+            <% end %>
+          </button>
+        </div>
       </div>
     <% else %>
       <div class="text-center py-8">
