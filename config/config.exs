@@ -94,7 +94,7 @@ config :ueberauth, Ueberauth,
     hubspot:
       {Ueberauth.Strategy.Hubspot,
        [
-         default_scope: "crm.objects.contacts.read crm.objects.contacts.write crm.schemas.custom.write"
+         default_scope: "crm.objects.contacts.read crm.objects.contacts.write crm.schemas.contacts.read"
        ]}
   ]
 

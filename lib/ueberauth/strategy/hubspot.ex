@@ -5,7 +5,7 @@ defmodule Ueberauth.Strategy.Hubspot do
 
   use Ueberauth.Strategy,
     uid_field: :user_id,
-    default_scope: "crm.objects.contacts.read crm.objects.contacts.write crm.schemas.custom.write",
+    default_scope: "crm.objects.contacts.read crm.objects.contacts.write crm.schemas.contacts.read",
     oauth2_module: Ueberauth.Strategy.Hubspot.OAuth
 
   alias Ueberauth.Auth.Info
